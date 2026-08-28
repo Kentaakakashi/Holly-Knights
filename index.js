@@ -534,6 +534,49 @@ client.on(
     async interaction => {
 
         if (!interaction.isButton()) return;
+        // ======================================
+// END REQUEST THREAD
+// ======================================
+
+if (interaction.customId === "end_request") {
+
+    if (!interaction.channel.isThread()) {
+        await interaction.reply({
+            content: "❌ This button can only be used inside a request thread.",
+            ephemeral: true
+        });
+
+        return;
+    }
+
+    if (!interaction.member.permissions.has("ManageThreads")) {
+        await interaction.reply({
+            content: "❌ You need **Manage Threads** permission to end this request.",
+            ephemeral: true
+        });
+
+        return;
+    }
+
+    await interaction.reply({
+        content: "🗑️ **This request is being deleted...**"
+    });
+
+    setTimeout(async () => {
+        try {
+            await interaction.channel.delete(
+                "Holly Knights request ended"
+            );
+        } catch (error) {
+            console.error(
+                "❌ Could not delete request thread:",
+                error
+            );
+        }
+    }, 3000);
+
+    return;
+}
 
         // Make sure counters belong to today
         checkDailyReset();
