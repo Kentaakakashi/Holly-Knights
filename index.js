@@ -1,5 +1,8 @@
 require("dotenv").config();
 
+const fs = require("fs");
+const path = require("path");
+
 const {
     Client,
     GatewayIntentBits,
@@ -7,8 +10,16 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    EmbedBuilder
+    EmbedBuilder,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+    ChannelType
 } = require("discord.js");
+
+// ==========================================
+// BOT
+// ==========================================
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds]
@@ -22,14 +33,25 @@ const WAR_ROLE_ID = process.env.WAR_ROLE_ID;
 const BACKUP_ROLE_ID = process.env.BACKUP_ROLE_ID;
 const DASHBOARD_CHANNEL_ID = process.env.DASHBOARD_CHANNEL_ID;
 
-const COOLDOWN_TIME = 60 * 1000; // 1 minute
+// India timezone
+const TIMEZONE = "Asia/Kolkata";
+
+// 1 minute cooldown per user
+const COOLDOWN_TIME = 60 * 1000;
+
+// Persistent data file
+const DATA_FILE = path.join(__dirname, "data.json");
 
 // ==========================================
-// COUNTERS
+// DATA
 // ==========================================
 
-let warCount = 0;
-let backupCount = 0;
+let data = {
+    date: "",
+    war: 0,
+    backup: 0,
+    dashboardMessageId: null
+};
 
 // ==========================================
 // COOLDOWNS
@@ -38,17 +60,105 @@ let backupCount = 0;
 const cooldowns = new Map();
 
 // ==========================================
-// DASHBOARD MESSAGE
+// DASHBOARD
 // ==========================================
 
 let dashboardMessage = null;
 
 // ==========================================
-// CREATE DASHBOARD EMBED
+// GET TODAY'S DATE
+// ==========================================
+
+function getToday() {
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone: TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+    }).format(new Date());
+}
+
+// ==========================================
+// LOAD DATA
+// ==========================================
+
+function loadData() {
+    try {
+        if (fs.existsSync(DATA_FILE)) {
+            const savedData = JSON.parse(
+                fs.readFileSync(DATA_FILE, "utf8")
+            );
+
+            data = {
+                ...data,
+                ...savedData
+            };
+
+            console.log("📂 Saved data loaded.");
+        }
+    } catch (error) {
+        console.error("❌ Could not load data:", error);
+    }
+
+    const today = getToday();
+
+    // New day = reset today's counters
+    if (data.date !== today) {
+        data.date = today;
+        data.war = 0;
+        data.backup = 0;
+
+        saveData();
+
+        console.log("🌅 New day detected. Counters reset.");
+    }
+}
+
+// ==========================================
+// SAVE DATA
+// ==========================================
+
+function saveData() {
+    try {
+        fs.writeFileSync(
+            DATA_FILE,
+            JSON.stringify(data, null, 4)
+        );
+
+        console.log("💾 Data saved.");
+    } catch (error) {
+        console.error("❌ Could not save data:", error);
+    }
+}
+
+// ==========================================
+// CHECK DAILY RESET
+// ==========================================
+
+function checkDailyReset() {
+    const today = getToday();
+
+    if (data.date !== today) {
+        data.date = today;
+        data.war = 0;
+        data.backup = 0;
+
+        saveData();
+
+        console.log("🌅 Counters reset for the new day.");
+
+        return true;
+    }
+
+    return false;
+}
+
+// ==========================================
+// DASHBOARD EMBED
 // ==========================================
 
 function createDashboardEmbed() {
-    const totalCount = warCount + backupCount;
+    const totalCount = data.war + data.backup;
 
     return new EmbedBuilder()
         .setTitle("🏰 HOLLY KNIGHTS")
@@ -62,8 +172,8 @@ function createDashboardEmbed() {
         .addFields({
             name: "📊 TODAY'S PING STATUS",
             value:
-                `⚔️ **WAR** — ${warCount}\n` +
-                `🛡️ **BACKUP** — ${backupCount}\n` +
+                `⚔️ **WAR** — ${data.war}\n` +
+                `🛡️ **BACKUP** — ${data.backup}\n` +
                 `📢 **TOTAL** — ${totalCount}`
         })
         .setFooter({
@@ -73,7 +183,7 @@ function createDashboardEmbed() {
 }
 
 // ==========================================
-// CREATE BUTTONS
+// DASHBOARD BUTTONS
 // ==========================================
 
 function createButtons() {
@@ -112,20 +222,249 @@ async function updateDashboard() {
 }
 
 // ==========================================
+// CREATE WAR MODAL
+// ==========================================
+
+function createWarModal() {
+    const modal = new ModalBuilder()
+        .setCustomId("war_modal")
+        .setTitle("⚔️ WAR REQUEST");
+
+    const region = new TextInputBuilder()
+        .setCustomId("region")
+        .setLabel("Region")
+        .setPlaceholder("Example: India / Asia / Europe / NA")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(100);
+
+    const serverLink = new TextInputBuilder()
+        .setCustomId("server_link")
+        .setLabel("Server / Game Link")
+        .setPlaceholder("Paste the game/server link")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(500);
+
+    const reason = new TextInputBuilder()
+        .setCustomId("reason")
+        .setLabel("Reason")
+        .setPlaceholder("Why do you need members for the war?")
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true)
+        .setMaxLength(1000);
+
+    const clan = new TextInputBuilder()
+        .setCustomId("clan")
+        .setLabel("Clan / People Names")
+        .setPlaceholder("Example: Black Dragon")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(200);
+
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(region),
+        new ActionRowBuilder().addComponents(serverLink),
+        new ActionRowBuilder().addComponents(reason),
+        new ActionRowBuilder().addComponents(clan)
+    );
+
+    return modal;
+}
+
+// ==========================================
+// CREATE BACKUP MODAL
+// ==========================================
+
+function createBackupModal() {
+    const modal = new ModalBuilder()
+        .setCustomId("backup_modal")
+        .setTitle("🛡️ BACKUP REQUEST");
+
+    const region = new TextInputBuilder()
+        .setCustomId("region")
+        .setLabel("Region")
+        .setPlaceholder("Example: India / Asia / Europe / NA")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(100);
+
+    const serverLink = new TextInputBuilder()
+        .setCustomId("server_link")
+        .setLabel("Server / Game Link")
+        .setPlaceholder("Paste the game/server link")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(500);
+
+    const reason = new TextInputBuilder()
+        .setCustomId("reason")
+        .setLabel("Reason")
+        .setPlaceholder("Why do you need backup?")
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true)
+        .setMaxLength(1000);
+
+    const clan = new TextInputBuilder()
+        .setCustomId("clan")
+        .setLabel("Clan / People Names")
+        .setPlaceholder("Example: Black Dragon")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(200);
+
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(region),
+        new ActionRowBuilder().addComponents(serverLink),
+        new ActionRowBuilder().addComponents(reason),
+        new ActionRowBuilder().addComponents(clan)
+    );
+
+    return modal;
+}
+
+// ==========================================
+// CREATE REQUEST EMBED
+// ==========================================
+
+function createRequestEmbed(type, user, details) {
+    const isWar = type === "war";
+
+    const title = isWar
+        ? "⚔️ WAR REQUEST"
+        : "🛡️ BACKUP REQUEST";
+
+    const description = isWar
+        ? `${user} has requested a **WAR**.\n\nIf you're available, join up and assist.`
+        : `${user} has requested **BACKUP**.\n\nIf you're available, join up and assist.`;
+
+    return new EmbedBuilder()
+        .setTitle(title)
+        .setDescription(description)
+        .addFields(
+            {
+                name: "🌍 Region",
+                value: details.region
+            },
+            {
+                name: "👤 Requested By",
+                value: `${user}`
+            },
+            {
+                name: "👥 Clan / People",
+                value: details.clan
+            },
+            {
+                name: "📝 Reason",
+                value: details.reason
+            },
+            {
+                name: "🔗 Server Link",
+                value: details.serverLink
+            },
+            {
+                name: "📊 Today's Statistics",
+                value:
+                    `⚔️ WAR — ${data.war}\n` +
+                    `🛡️ BACKUP — ${data.backup}\n` +
+                    `📢 TOTAL — ${data.war + data.backup}`
+            }
+        )
+        .setTimestamp();
+}
+
+// ==========================================
+// CREATE REQUEST THREAD
+// ==========================================
+
+async function createRequestThread(type, interaction, details) {
+    const channel = interaction.channel;
+
+    if (!channel) {
+        throw new Error("Interaction channel not found.");
+    }
+
+    const isWar = type === "war";
+
+    const roleId = isWar
+        ? WAR_ROLE_ID
+        : BACKUP_ROLE_ID;
+
+    const threadName = isWar
+        ? `⚔️ WAR - ${interaction.user.username}`
+        : `🛡️ BACKUP - ${interaction.user.username}`;
+
+    // Create a public thread
+    const thread = await channel.threads.create({
+        name: threadName,
+        type: ChannelType.PublicThread,
+        autoArchiveDuration: 1440,
+        reason: isWar
+            ? "Holly Knights WAR request"
+            : "Holly Knights BACKUP request"
+    });
+
+    // Send request inside the thread
+    await thread.send({
+        content: `<@&${roleId}>`,
+        embeds: [
+            createRequestEmbed(
+                type,
+                interaction.user,
+                details
+            )
+        ],
+        allowedMentions: {
+            roles: [roleId]
+        }
+    });
+
+    return thread;
+}
+
+// ==========================================
 // FIND OR CREATE DASHBOARD
 // ==========================================
 
 async function setupDashboard(bot) {
     try {
-        const channel = await bot.channels.fetch(DASHBOARD_CHANNEL_ID);
+        const channel = await bot.channels.fetch(
+            DASHBOARD_CHANNEL_ID
+        );
 
         if (!channel) {
             console.log("❌ Dashboard channel not found.");
             return;
         }
 
-        // Look through recent messages for our existing dashboard
-        const messages = await channel.messages.fetch({ limit: 50 });
+        // First try saved dashboard message
+        if (data.dashboardMessageId) {
+            try {
+                dashboardMessage =
+                    await channel.messages.fetch(
+                        data.dashboardMessageId
+                    );
+
+                console.log("✅ Saved dashboard found!");
+
+                await updateDashboard();
+
+                return;
+            } catch (error) {
+                console.log(
+                    "⚠️ Saved dashboard could not be found. Searching..."
+                );
+
+                dashboardMessage = null;
+                data.dashboardMessageId = null;
+                saveData();
+            }
+        }
+
+        // Search recent messages
+        const messages = await channel.messages.fetch({
+            limit: 50
+        });
 
         dashboardMessage = messages.find(
             message =>
@@ -138,23 +477,36 @@ async function setupDashboard(bot) {
                 )
         );
 
-        // If no dashboard exists, create one
-        if (!dashboardMessage) {
-            dashboardMessage = await channel.send({
-                embeds: [createDashboardEmbed()],
-                components: [createButtons()]
-            });
+        if (dashboardMessage) {
+            data.dashboardMessageId =
+                dashboardMessage.id;
 
-            console.log("✅ New dashboard created!");
-        } else {
-            // Update existing dashboard
+            saveData();
+
             await updateDashboard();
 
             console.log("✅ Existing dashboard found!");
+            return;
         }
 
+        // No dashboard exists, create one
+        dashboardMessage = await channel.send({
+            embeds: [createDashboardEmbed()],
+            components: [createButtons()]
+        });
+
+        data.dashboardMessageId =
+            dashboardMessage.id;
+
+        saveData();
+
+        console.log("✅ New dashboard created!");
+
     } catch (error) {
-        console.error("❌ Dashboard setup failed:", error);
+        console.error(
+            "❌ Dashboard setup failed:",
+            error
+        );
     }
 }
 
@@ -162,8 +514,10 @@ async function setupDashboard(bot) {
 // BOT READY
 // ==========================================
 
-client.once(Events.ClientReady, async (bot) => {
+client.once(Events.ClientReady, async bot => {
     console.log(`✅ ${bot.user.tag} is online!`);
+
+    loadData();
 
     await setupDashboard(bot);
 });
@@ -172,118 +526,229 @@ client.once(Events.ClientReady, async (bot) => {
 // BUTTON HANDLER
 // ==========================================
 
-client.on(Events.InteractionCreate, async (interaction) => {
+client.on(
+    Events.InteractionCreate,
+    async interaction => {
 
-    if (!interaction.isButton()) return;
+        if (!interaction.isButton()) return;
 
-    const userId = interaction.user.id;
+        // Make sure counters belong to today
+        checkDailyReset();
 
-    // ======================================
-    // CHECK COOLDOWN
-    // ======================================
+        const userId = interaction.user.id;
 
-    const lastUsed = cooldowns.get(userId);
+        // ======================================
+        // COOLDOWN
+        // ======================================
 
-    if (lastUsed) {
-        const timePassed = Date.now() - lastUsed;
+        const lastUsed = cooldowns.get(userId);
 
-        if (timePassed < COOLDOWN_TIME) {
-            const remaining = Math.ceil(
-                (COOLDOWN_TIME - timePassed) / 1000
+        if (lastUsed) {
+            const timePassed =
+                Date.now() - lastUsed;
+
+            if (timePassed < COOLDOWN_TIME) {
+
+                const remaining = Math.ceil(
+                    (COOLDOWN_TIME - timePassed) / 1000
+                );
+
+                await interaction.reply({
+                    content:
+                        `⏳ **Slow down!** You can request again in **${remaining} seconds**.`,
+                    ephemeral: true
+                });
+
+                return;
+            }
+        }
+
+        // ======================================
+        // WAR BUTTON
+        // ======================================
+
+        if (interaction.customId === "war") {
+
+            await interaction.showModal(
+                createWarModal()
             );
 
-            await interaction.reply({
-                content: `⏳ **Slow down!** You can request again in **${remaining} seconds**.`,
-                ephemeral: true
-            });
+            return;
+        }
+
+        // ======================================
+        // BACKUP BUTTON
+        // ======================================
+
+        if (interaction.customId === "backup") {
+
+            await interaction.showModal(
+                createBackupModal()
+            );
 
             return;
         }
     }
+);
 
-    // ======================================
-    // WAR
-    // ======================================
+// ==========================================
+// MODAL SUBMISSION HANDLER
+// ==========================================
 
-    if (interaction.customId === "war") {
+client.on(
+    Events.InteractionCreate,
+    async interaction => {
 
-        cooldowns.set(userId, Date.now());
+        if (!interaction.isModalSubmit()) return;
 
-        warCount++;
+        // ======================================
+        // CHECK DAILY RESET
+        // ======================================
 
-        // Update main dashboard
-        await updateDashboard();
+        checkDailyReset();
 
-        // Send WAR request
-        await interaction.reply({
-            content: `<@&${WAR_ROLE_ID}>`,
-            embeds: [
-                new EmbedBuilder()
-                    .setTitle("⚔️ WAR REQUEST")
-                    .setDescription(
-                        `${interaction.user} has requested a **WAR**.\n\n` +
-                        "If you're available, join up and assist."
-                    )
-                    .addFields({
-                        name: "📊 Today's Statistics",
-                        value:
-                            `⚔️ WAR — ${warCount}\n` +
-                            `🛡️ BACKUP — ${backupCount}\n` +
-                            `📢 TOTAL — ${warCount + backupCount}`
-                    })
-                    .setTimestamp()
-            ],
-            allowedMentions: {
-                roles: [WAR_ROLE_ID]
+        const isWar =
+            interaction.customId === "war_modal";
+
+        const isBackup =
+            interaction.customId === "backup_modal";
+
+        if (!isWar && !isBackup) return;
+
+        const userId = interaction.user.id;
+
+        // ======================================
+        // CHECK COOLDOWN AGAIN
+        // ======================================
+
+        const lastUsed = cooldowns.get(userId);
+
+        if (lastUsed) {
+
+            const timePassed =
+                Date.now() - lastUsed;
+
+            if (timePassed < COOLDOWN_TIME) {
+
+                const remaining = Math.ceil(
+                    (COOLDOWN_TIME - timePassed) / 1000
+                );
+
+                await interaction.reply({
+                    content:
+                        `⏳ **Slow down!** You can request again in **${remaining} seconds**.`,
+                    ephemeral: true
+                });
+
+                return;
             }
-        });
+        }
 
-        return;
-    }
+        // ======================================
+        // GET FORM DATA
+        // ======================================
 
-    // ======================================
-    // BACKUP
-    // ======================================
+        const details = {
+            region: interaction.fields.getTextInputValue(
+                "region"
+            ),
 
-    if (interaction.customId === "backup") {
+            serverLink: interaction.fields.getTextInputValue(
+                "server_link"
+            ),
 
-        cooldowns.set(userId, Date.now());
+            reason: interaction.fields.getTextInputValue(
+                "reason"
+            ),
 
-        backupCount++;
+            clan: interaction.fields.getTextInputValue(
+                "clan"
+            )
+        };
 
-        // Update main dashboard
-        await updateDashboard();
+        const type = isWar
+            ? "war"
+            : "backup";
 
-        // Send BACKUP request
-        await interaction.reply({
-            content: `<@&${BACKUP_ROLE_ID}>`,
-            embeds: [
-                new EmbedBuilder()
-                    .setTitle("🛡️ BACKUP REQUEST")
-                    .setDescription(
-                        `${interaction.user} has requested **BACKUP**.\n\n` +
-                        "If you're available, join up and assist."
-                    )
-                    .addFields({
-                        name: "📊 Today's Statistics",
-                        value:
-                            `⚔️ WAR — ${warCount}\n` +
-                            `🛡️ BACKUP — ${backupCount}\n` +
-                            `📢 TOTAL — ${warCount + backupCount}`
-                    })
-                    .setTimestamp()
-            ],
-            allowedMentions: {
-                roles: [BACKUP_ROLE_ID]
+        // ======================================
+        // CREATE THREAD + REQUEST
+        // ======================================
+
+        try {
+
+            // Defer while thread is being created
+            await interaction.deferReply({
+                ephemeral: true
+            });
+
+            const thread =
+                await createRequestThread(
+                    type,
+                    interaction,
+                    details
+                );
+
+            // ==================================
+            // INCREMENT COUNTER
+            // ==================================
+
+            if (isWar) {
+                data.war++;
+            } else {
+                data.backup++;
             }
-        });
 
-        return;
+            // ==================================
+            // START COOLDOWN
+            // ==================================
+
+            cooldowns.set(
+                userId,
+                Date.now()
+            );
+
+            // ==================================
+            // SAVE EVERYTHING
+            // ==================================
+
+            saveData();
+
+            // ==================================
+            // UPDATE DASHBOARD
+            // ==================================
+
+            await updateDashboard();
+
+            // ==================================
+            // CONFIRMATION
+            // ==================================
+
+            await interaction.editReply({
+                content:
+                    `✅ Your ${isWar ? "WAR" : "BACKUP"} request has been created!\n\n` +
+                    `📁 ${thread}`
+            });
+
+        } catch (error) {
+
+            console.error(
+                "❌ Could not create request:",
+                error
+            );
+
+            // Do NOT start cooldown if request failed
+            await interaction.editReply({
+                content:
+                    "❌ Something went wrong while creating your request. Please try again."
+            });
+        }
     }
-});
+);
 
 // ==========================================
 // LOGIN
 // ==========================================
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(
+    process.env.DISCORD_TOKEN
+);
