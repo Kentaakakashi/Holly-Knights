@@ -57,7 +57,7 @@ const DATA_FILE = path.join(__dirname, "data.json");
 //
 // ==========================================
 
-const BANNER_URL = "";
+const BANNER_URL = "https://cdn.discordapp.com/attachments/1542930463495295077/1542930501952864266/IMG_20260828_214420.jpg?ex=6a930581&is=6a91b401&hm=6362ab065128692b2220db4e836e714f4a88208dc3ffc5b530d39a5c2999c80b&";
 
 // ==========================================
 // DATA
@@ -209,7 +209,7 @@ function createDashboardEmbed() {
         BANNER_URL &&
         BANNER_URL.startsWith("http")
     ) {
-        embed.setImage(https://cdn.discordapp.com/attachments/1542930463495295077/1542930501952864266/IMG_20260828_214420.jpg?ex=6a930581&is=6a91b401&hm=6362ab065128692b2220db4e836e714f4a88208dc3ffc5b530d39a5c2999c80b&);
+        embed.setImage("BANNER_URL");
     }
 
     return embed;
