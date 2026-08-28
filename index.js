@@ -361,14 +361,8 @@ function createRequestEmbed(type, user, details) {
             {
                 name: "🔗 Server Link",
                 value: details.serverLink
-            },
-            {
-                name: "📊 Today's Statistics",
-                value:
-                    `⚔️ WAR — ${data.war}\n` +
-                    `🛡️ BACKUP — ${data.backup}\n` +
-                    `📢 TOTAL — ${data.war + data.backup}`
             }
+            
         )
         .setTimestamp();
 }
