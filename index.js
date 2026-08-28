@@ -399,19 +399,28 @@ async function createRequestThread(type, interaction, details) {
     });
 
     // Send request inside the thread
-    await thread.send({
-        content: `<@&${roleId}>`,
-        embeds: [
-            createRequestEmbed(
-                type,
-                interaction.user,
-                details
-            )
-        ],
-        allowedMentions: {
-            roles: [roleId]
-        }
-    });
+    const endButton = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+        .setCustomId("end_request")
+        .setLabel("END")
+        .setEmoji("🛑")
+        .setStyle(ButtonStyle.Danger)
+);
+
+await thread.send({
+    content: `<@&${roleId}>`,
+    embeds: [
+        createRequestEmbed(
+            type,
+            interaction.user,
+            details
+        )
+    ],
+    components: [endButton],
+    allowedMentions: {
+        roles: [roleId]
+    }
+});
 
     return thread;
 }
