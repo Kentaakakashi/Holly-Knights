@@ -14,24 +14,38 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
 
-// ================================
+// ==========================================
 // CONFIG
-// ================================
+// ==========================================
 
 const WAR_ROLE_ID = process.env.WAR_ROLE_ID;
 const BACKUP_ROLE_ID = process.env.BACKUP_ROLE_ID;
 const DASHBOARD_CHANNEL_ID = process.env.DASHBOARD_CHANNEL_ID;
 
-// ================================
-// PING COUNTERS
-// ================================
+const COOLDOWN_TIME = 60 * 1000; // 1 minute
+
+// ==========================================
+// COUNTERS
+// ==========================================
 
 let warCount = 0;
 let backupCount = 0;
 
-// ================================
-// CREATE DASHBOARD
-// ================================
+// ==========================================
+// COOLDOWNS
+// ==========================================
+
+const cooldowns = new Map();
+
+// ==========================================
+// DASHBOARD MESSAGE
+// ==========================================
+
+let dashboardMessage = null;
+
+// ==========================================
+// CREATE DASHBOARD EMBED
+// ==========================================
 
 function createDashboardEmbed() {
     const totalCount = warCount + backupCount;
@@ -58,9 +72,9 @@ function createDashboardEmbed() {
         .setTimestamp();
 }
 
-// ================================
+// ==========================================
 // CREATE BUTTONS
-// ================================
+// ==========================================
 
 function createButtons() {
     return new ActionRowBuilder().addComponents(
@@ -78,13 +92,30 @@ function createButtons() {
     );
 }
 
-// ================================
-// BOT READY
-// ================================
+// ==========================================
+// UPDATE DASHBOARD
+// ==========================================
 
-client.once(Events.ClientReady, async (bot) => {
-    console.log(`✅ ${bot.user.tag} is online!`);
+async function updateDashboard() {
+    if (!dashboardMessage) return;
 
+    try {
+        await dashboardMessage.edit({
+            embeds: [createDashboardEmbed()],
+            components: [createButtons()]
+        });
+
+        console.log("📊 Dashboard updated!");
+    } catch (error) {
+        console.error("❌ Could not update dashboard:", error);
+    }
+}
+
+// ==========================================
+// FIND OR CREATE DASHBOARD
+// ==========================================
+
+async function setupDashboard(bot) {
     try {
         const channel = await bot.channels.fetch(DASHBOARD_CHANNEL_ID);
 
@@ -93,27 +124,97 @@ client.once(Events.ClientReady, async (bot) => {
             return;
         }
 
-        await channel.send({
-            embeds: [createDashboardEmbed()],
-            components: [createButtons()]
-        });
+        // Look through recent messages for our existing dashboard
+        const messages = await channel.messages.fetch({ limit: 50 });
 
-        console.log("✅ Dashboard sent successfully!");
+        dashboardMessage = messages.find(
+            message =>
+                message.author.id === bot.user.id &&
+                message.components.length > 0 &&
+                message.components.some(row =>
+                    row.components.some(button =>
+                        button.customId === "war"
+                    )
+                )
+        );
+
+        // If no dashboard exists, create one
+        if (!dashboardMessage) {
+            dashboardMessage = await channel.send({
+                embeds: [createDashboardEmbed()],
+                components: [createButtons()]
+            });
+
+            console.log("✅ New dashboard created!");
+        } else {
+            // Update existing dashboard
+            await updateDashboard();
+
+            console.log("✅ Existing dashboard found!");
+        }
+
     } catch (error) {
-        console.error("❌ Could not send dashboard:", error);
+        console.error("❌ Dashboard setup failed:", error);
     }
+}
+
+// ==========================================
+// BOT READY
+// ==========================================
+
+client.once(Events.ClientReady, async (bot) => {
+    console.log(`✅ ${bot.user.tag} is online!`);
+
+    await setupDashboard(bot);
 });
 
-// ================================
+// ==========================================
 // BUTTON HANDLER
-// ================================
+// ==========================================
 
 client.on(Events.InteractionCreate, async (interaction) => {
+
     if (!interaction.isButton()) return;
 
+    const userId = interaction.user.id;
+
+    // ======================================
+    // CHECK COOLDOWN
+    // ======================================
+
+    const lastUsed = cooldowns.get(userId);
+
+    if (lastUsed) {
+        const timePassed = Date.now() - lastUsed;
+
+        if (timePassed < COOLDOWN_TIME) {
+            const remaining = Math.ceil(
+                (COOLDOWN_TIME - timePassed) / 1000
+            );
+
+            await interaction.reply({
+                content: `⏳ **Slow down!** You can request again in **${remaining} seconds**.`,
+                ephemeral: true
+            });
+
+            return;
+        }
+    }
+
+    // ======================================
+    // WAR
+    // ======================================
+
     if (interaction.customId === "war") {
+
+        cooldowns.set(userId, Date.now());
+
         warCount++;
 
+        // Update main dashboard
+        await updateDashboard();
+
+        // Send WAR request
         await interaction.reply({
             content: `<@&${WAR_ROLE_ID}>`,
             embeds: [
@@ -140,9 +241,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
     }
 
+    // ======================================
+    // BACKUP
+    // ======================================
+
     if (interaction.customId === "backup") {
+
+        cooldowns.set(userId, Date.now());
+
         backupCount++;
 
+        // Update main dashboard
+        await updateDashboard();
+
+        // Send BACKUP request
         await interaction.reply({
             content: `<@&${BACKUP_ROLE_ID}>`,
             embeds: [
@@ -170,8 +282,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 });
 
-// ================================
+// ==========================================
 // LOGIN
-// ================================
+// ==========================================
 
 client.login(process.env.DISCORD_TOKEN);
